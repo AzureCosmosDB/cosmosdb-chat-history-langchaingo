@@ -1,4 +1,4 @@
-# Chat History for Azure Cosmos DB NoSQL API using langchaingo
+# Chat history for Azure Cosmos DB using langchaingo
 
 ![App](images/app.png)
 
@@ -61,7 +61,7 @@ You can use any LLM supported with `langchaingo`. This example uses Azure OpenAI
 
 Make sure to note the Azure OpenAI resource endpoint and API key, as you will need them to configure the application.
 
-> If you choose a different LLM and embedding model, you will need to make slight changes to the code TODO link.
+> If you choose a different LLM and embedding model, you will need to make slight changes to the code - [check this part in server.go](https://github.com/AzureCosmosDB/cosmosdb-chat-history-langchaingo/blob/main/server/server.go#L90)
 
 ## Running the Application
 
