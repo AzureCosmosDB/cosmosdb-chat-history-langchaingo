@@ -27,7 +27,7 @@ You need to set up and configure the following components before running the app
 
 You can run the application using either the Azure Cosmos DB Linux emulator or the actual Azure Cosmos DB service. The emulator is a great way to develop and test your application locally without incurring costs.
 
-#### Option 1: Azure Cosmos DB Emulator (Local Development)
+#### Option 1: Azure Cosmos DB emulator (Local Development)
 
 Create a directory to persist emulator data and run it using Docker:
 
@@ -39,13 +39,13 @@ docker run --publish 8081:8081 --publish 1234:1234 --mount type=bind,source=./em
 
 > Refer to the [Running](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator-linux#running) section in the emulator documentation for more details.
 
-#### Option 2: Azure Cosmos DB Service
+#### Option 2: Azure Cosmos DB service
 
 If you want to use the actual Azure Cosmos DB service, [Create an Azure Cosmos DB account](https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/how-to-create-account?tabs=azure-portal#create-an-account) in your Azure subscription. If for some reason you cannot create an Azure subscription, [try Azure Cosmos DB for NoSQL free](https://cosmos.azure.com/try/).
 
 > Note the Azure Cosmos DB account connection string for later use
 
-#### Container Configuration
+#### Container configuration
 
 Regardless of which option you choose, ensure that you:
 
@@ -63,7 +63,7 @@ Make sure to note the Azure OpenAI resource endpoint and API key, as you will ne
 
 > If you choose a different LLM and embedding model, you will need to make slight changes to the code - [check this part in server.go](https://github.com/AzureCosmosDB/cosmosdb-chat-history-langchaingo/blob/main/server/server.go#L90)
 
-## Running the Application
+## Running the application
 
 Clone this repository:
 
@@ -104,6 +104,8 @@ go run main.go
 > This will start a web server on `http://localhost:8080`.
 
 ## Using the chatbot
+
+![Login page](images/login.png)
 
 1. Open your browser to http://localhost:8080
 2. Enter a user ID of your choice to log in. This user ID will be used to store and retrieve your chat history (the user ID is not authenticated and is only used for demonstration purposes)
