@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with LangChain Go & CosmosDB</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-comments"></i> Yet another chatbot 😉</h1>
+        </header>
+        <div class="login-container" id="login-container">
+            <div class="login-form">
+                <h2>Welcome</h2>
+                <div class="form-group">
+                    <div class="input-with-icon">
+                        <i class="fas fa-user input-icon"></i>
+                        <input type="text" id="user-id" placeholder="Enter your user ID" required>
+                    </div>
+                </div>
+                <button id="start-chat-btn" class="btn">
+                    <span class="btn-text">Start Chat</span>
+                    <span class="spinner" id="login-spinner" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+
+        <div class="chat-container" id="chat-container" style="display: none;">
+            <div class="app-header">
+                <div class="user-display">
+                    <span class="user-label">Logged-in user:</span>
+                    <span id="display-user-id" class="user-id"></span>
+                </div>
+                <button id="sign-out-btn" class="btn small-btn">
+                    <i class="fas fa-sign-out-alt"></i> Sign Out
+                </button>
+            </div>
+            <div class="main-content">
+                <div class="chat-sidebar" id="chat-sidebar">
+                    <div class="sidebar-header">
+                        <h3><i class="fas fa-history"></i> Your Conversations</h3>
+                        <button id="new-conversation-btn" class="icon-btn" title="New Conversation">
+                            <span class="icon-btn-text"><i class="fas fa-plus"></i></span>
+                            <span class="spinner small-spinner" id="new-convo-spinner" style="display: none;"></span>
+                        </button>
+                    </div>
+                    <div class="conversations-list" id="conversations-list">
+                        <!-- Conversations will be listed here -->
+                        <div class="no-conversations" id="no-conversations">
+                            <i class="fas fa-comment-slash"></i>
+                            <p>No conversations found</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-main">
+                    <div class="chat-messages" id="chat-messages">
+                        <!-- Messages will be added here dynamically -->
+                        <div class="empty-chat-message">
+                            <i class="far fa-comment-dots fa-3x"></i>
+                            <p>This is the beginning of your conversation</p>
+                        </div>
+                    </div>
+                    <div class="chat-input">
+                        <textarea id="message-input" placeholder="Type a message..." rows="2"></textarea>
+                        <button id="send-btn" class="btn">
+                            <span class="btn-text"><i class="fas fa-paper-plane"></i> Send</span>
+                            <span class="spinner small-spinner" id="send-spinner" style="display: none;"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer message now outside of both containers -->
+        <div class="footer-message">
+            Made with ❤️ using <a href="https://github.com/tmc/langchaingo" target="_blank">langchaingo</a> and the
+            <a href="https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/sdk-go" target="_blank">Go SDK for Azure
+                Cosmos DB </a> 🚀
+
+            Check out the <a href="https://example.com" target="_blank">blog post</a> 📝
+        </div>
+
+        <!-- Loading overlay for page transitions -->
+        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading...</div>
+        </div>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
