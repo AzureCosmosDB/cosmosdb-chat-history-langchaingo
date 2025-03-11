@@ -4,7 +4,7 @@
 
 This application demonstrates a chat history implementation for Azure Cosmos DB NoSQL API using [langchaingo](https://github.com/tmc/langchaingo) and the [Go SDK for Azure Cosmos DB](https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/sdk-go). If you haven't used the Go SDK before, this application can be a useful and practical way to learn the basics, including operations like [read](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos#ContainerClient.ReadItem), [upsert](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos#ContainerClient.UpsertItem), etc. It also demonstrates an example of how to use the [Azure Cosmos DB Linux-based emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator-linux) (in *preview* at the time of writing) for integration tests with [Testcontainers for Go](https://golang.testcontainers.org/).
 
-> Read this blog post for more details: [coming soon](TODO link)
+> Read this blog post for details: [Implementing Chat History for AI Applications Using Azure Cosmos DB Go SDK](https://devblogs.microsoft.com/cosmosdb/implementing-chat-history-for-ai-applications-using-azure-cosmos-db-go-sdk)
 
 ## Features
 
