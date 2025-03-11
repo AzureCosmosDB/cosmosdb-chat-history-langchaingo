@@ -1,4 +1,4 @@
-# Chat history implementation for langchaingo using the Azure Cosmos DB Go SDK
+# Implement Chat History for AI Applications Using Azure Cosmos DB Go SDK
 
 ![App](images/app.png)
 
