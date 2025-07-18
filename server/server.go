@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/abhirockzz/langchaingo-cosmosdb-chat-history/cosmosdb"
 	"github.com/google/uuid"
@@ -23,106 +21,57 @@ import (
 )
 
 const (
-	template           = "{{.chat_history}}\n{{.human_input}}"
-	// databaseName       = "chat_history_langchaingo"
-	// containerName      = "chats"
+	template = "{{.chat_history}}\n{{.human_input}}"
 )
 
 var (
-	databaseName	   string
-	containerName      string
-	cosmosDBEndpoint string
-	cosmosDBConnectionString string
-	llm     *openai.LLM
-	cosmosClient *azcosmos.Client
 	promptsTemplate prompts.PromptTemplate
 )
+
+func init() {
+	promptsTemplate = prompts.NewPromptTemplate(
+		template,
+		[]string{"chat_history", "human_input"},
+	)
+}
+
+type App struct {
+	cosmosClient  *azcosmos.Client
+	container     *azcosmos.ContainerClient
+	databaseName  string
+	containerName string
+	//modelName     string
+	llm *openai.LLM
+}
+
+func New(databaseName, containerName string, client *azcosmos.Client, llm *openai.LLM) (*App, error) {
+	app := &App{
+		databaseName:  databaseName,
+		containerName: containerName,
+		cosmosClient:  client,
+		llm:           llm,
+	}
+
+	database, err := app.cosmosClient.NewDatabase(app.databaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	container, err := database.NewContainer(app.containerName)
+	if err != nil {
+		return nil, err
+	}
+
+	app.container = container
+
+	return app, nil
+}
 
 // Global session map to manage active LLM chains
 // In a production app, you might want something more robust
 var activeChains = make(map[string]*chains.LLMChain)
 
-func init() {
-
-	cosmosDBConnectionString = os.Getenv("COSMOSDB_CONNECTION_STRING")
-	if cosmosDBConnectionString == "" {
-		//log.Fatalf("COSMOSDB_ENDPOINT_URL environment variable is not set")
-		//log.Println("COSMOSDB_CONNECTION_STRING environment variable is not set, using COSMOSDB_ENDPOINT_URL instead")
-
-		cosmosDBEndpoint = os.Getenv("COSMOSDB_ENDPOINT_URL")
-		if cosmosDBEndpoint == "" {
-			log.Fatalf("You must set either COSMOSDB_CONNECTION_STRING or COSMOSDB_ENDPOINT_URL")
-		}
-	}
-
-	// we don't need the endpoint and key, but they should be configured as environment variables for langchaingo
-	if os.Getenv("OPENAI_BASE_URL") == "" {
-		log.Fatalf("OPENAI_BASE_URL environment variable is not set")
-	}
-
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		log.Fatalf("OPENAI_API_KEY environment variable is not set")
-	}
-
-	modelName := os.Getenv("AZURE_OPENAI_MODEL_NAME")
-	if modelName == "" {
-		log.Fatalf("AZURE_OPENAI_MODEL_NAME environment variable is not set")
-	}
-	
-	// embeddingModelName := os.Getenv("AZURE_OPENAI_EMBEDDING_MODEL_NAME")
-	// if embeddingModelName == "" {
-	// 	log.Fatalf("AZURE_OPENAI_EMBEDDING_MODEL_NAME environment variable is not set")
-	// }
-
-	databaseName = os.Getenv("COSMOSDB_DATABASE_NAME")
-	if databaseName == "" {
-		log.Fatalf("COSMOSDB_DATABASE_NAME environment variable is not set")
-	}
-
-	containerName = os.Getenv("COSMOSDB_CONTAINER_NAME")
-	if containerName == "" {
-		log.Fatalf("COSMOSDB_CONTAINER_NAME environment variable is not set")
-	}
-
-	var err error
-
-	// Initialize the Azure OpenAI LLM
-    llm, err = openai.New(
-        openai.WithAPIType(openai.APITypeAzure),
-        openai.WithModel(modelName),
-		// an embedding model is not actually required but has been added because langchaingo requires it
-        openai.WithEmbeddingModel("dummy_value"),
-    )
-    if err != nil {
-        log.Fatalf("Failed to initialize Azure OpenAI LLM: %v", err)
-    }
-
-	// Initialize the prompt template
-	promptsTemplate = prompts.NewPromptTemplate(
-		template,
-		[]string{"chat_history", "human_input"},
-	)
-
-	// Initialize the CosmosDB client
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
-		log.Fatal("Failed to create Azure credential:", err)
-	}
-
-	if cosmosDBConnectionString != "" {
-		cosmosClient, err = azcosmos.NewClientFromConnectionString(cosmosDBConnectionString, nil)
-	} else {
-		cosmosClient, err = azcosmos.NewClient(cosmosDBEndpoint, credential, nil)
-	}
-
-	if err != nil {
-		log.Fatal("Failed to create CosmosDB client:", err)
-	}
-
-	log.Println("Initialized LLM and CosmosDB client")
-}
-
-func HandleStartChat(w http.ResponseWriter, r *http.Request) {
+func (app *App) HandleStartChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -146,7 +95,7 @@ func HandleStartChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a chat history instance
-	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(cosmosClient, databaseName, containerName, req.SessionID, req.UserID)
+	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(app.cosmosClient, app.databaseName, app.containerName, req.SessionID, req.UserID)
 	if err != nil {
 		log.Printf("Error creating chat history: %v", err)
 		sendErrorResponse(w, "Failed to create chat session", http.StatusInternalServerError)
@@ -162,7 +111,7 @@ func HandleStartChat(w http.ResponseWriter, r *http.Request) {
 	// Create an LLM chain
 	chain := chains.LLMChain{
 		Prompt:       promptsTemplate,
-		LLM:          llm,
+		LLM:          app.llm,
 		Memory:       chatMemory,
 		OutputParser: outputparser.NewSimple(),
 		OutputKey:    "text",
@@ -181,7 +130,7 @@ func HandleStartChat(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
+func (app *App) HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -218,7 +167,7 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 
 	if !exists {
 		// If chain doesn't exist, create a new one
-		cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(cosmosClient, databaseName, containerName, req.SessionID, req.UserID)
+		cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(app.cosmosClient, app.databaseName, app.containerName, req.SessionID, req.UserID)
 		if err != nil {
 			log.Printf("Error creating chat history: %v", err)
 			http.Error(w, "Failed to create chat session", http.StatusInternalServerError)
@@ -232,7 +181,7 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 
 		newChain := chains.LLMChain{
 			Prompt:       promptsTemplate,
-			LLM:          llm,
+			LLM:          app.llm,
 			Memory:       chatMemory,
 			OutputParser: outputparser.NewSimple(),
 			OutputKey:    "text",
@@ -250,18 +199,18 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	var fullResponse string
 
 	// Stream the response using the chain
-	_, err := chains.Call(ctx, *chain, 
-		map[string]any{"human_input": req.Message}, 
+	_, err := chains.Call(ctx, *chain,
+		map[string]any{"human_input": req.Message},
 		chains.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			// Write the chunk to the response
 			_, err := w.Write(chunk)
 			if err != nil {
 				return err
 			}
-			
+
 			// Collect the full response
 			fullResponse += string(chunk)
-			
+
 			// Flush the buffer to send the chunk immediately
 			flusher.Flush()
 			return nil
@@ -271,7 +220,7 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Error streaming response: %v", err)
 		//errorOccurred = true
-		
+
 		// Send an error message to the client if we haven't already sent a partial response
 		if fullResponse == "" {
 			// Clean up the error message for display to the user
@@ -281,7 +230,7 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 			} else {
 				errorMsg = "I apologize, but I encountered an error processing your request. Please try again later."
 			}
-			
+
 			// Return the error as plain text since we've already set the response headers
 			w.Write([]byte(errorMsg))
 			flusher.Flush()
@@ -289,7 +238,7 @@ func HandleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func HandleGetHistory(w http.ResponseWriter, r *http.Request) {
+func (app *App) HandleGetHistory(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	if r.Method != http.MethodGet {
@@ -307,7 +256,7 @@ func HandleGetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a chat history instance
-	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(cosmosClient, databaseName, containerName, sessionID, userID)
+	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(app.cosmosClient, app.databaseName, app.containerName, sessionID, userID)
 	if err != nil {
 		log.Printf("Error creating chat history: %v", err)
 		sendErrorResponse(w, "Failed to access chat history", http.StatusInternalServerError)
@@ -326,7 +275,7 @@ func HandleGetHistory(w http.ResponseWriter, r *http.Request) {
 	var messageInfos []MessageInfo
 	for _, msg := range messages {
 		messageType := "unknown"
-		
+
 		switch msg.GetType() {
 		case llms.ChatMessageTypeHuman:
 			messageType = "human"
@@ -354,7 +303,7 @@ func HandleGetHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // Function to handle retrieving all conversations for a user
-func HandleListConversations(w http.ResponseWriter, r *http.Request) {
+func (app *App) HandleListConversations(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -368,22 +317,9 @@ func HandleListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf("SELECT * FROM c WHERE c.userid = '%s'", userID)
-	database, err := cosmosClient.NewDatabase(databaseName)
-	if err != nil {
-		log.Printf("Error getting database: %v", err)
-		sendErrorResponse(w, "Failed to access database", http.StatusInternalServerError)
-		return
-	}
-
-	container, err := database.NewContainer(containerName)
-	if err != nil {
-		log.Printf("Error getting container: %v", err)
-		sendErrorResponse(w, "Failed to access container", http.StatusInternalServerError)
-		return
-	}
 
 	pk := azcosmos.NewPartitionKeyString(userID)
-	queryPager := container.NewQueryItemsPager(query, pk, nil)
+	queryPager := app.container.NewQueryItemsPager(query, pk, nil)
 	var conversations []ConversationInfo
 
 	for queryPager.More() {
@@ -412,7 +348,7 @@ func HandleListConversations(w http.ResponseWriter, r *http.Request) {
 			}
 
 			conv := ConversationInfo{
-				SessionID: sessionID,
+				SessionID:    sessionID,
 				MessageCount: 0,
 			}
 
@@ -435,33 +371,33 @@ func HandleListConversations(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func HandleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+func (app *App) HandleDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	var req DeleteConversationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendErrorResponse(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate fields
 	if req.UserID == "" || req.SessionID == "" {
 		sendErrorResponse(w, "UserID and SessionID are required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create a chat history instance
-	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(cosmosClient, databaseName, containerName, req.SessionID, req.UserID)
+	cosmosChatHistory, err := cosmosdb.NewCosmosDBChatMessageHistory(app.cosmosClient, app.databaseName, app.containerName, req.SessionID, req.UserID)
 	if err != nil {
 		log.Printf("Error creating chat history: %v", err)
 		sendErrorResponse(w, "Failed to access chat history", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Delete the conversation using the Clear method
 	err = cosmosChatHistory.Clear(context.Background())
 	if err != nil {
@@ -469,15 +405,15 @@ func HandleDeleteConversation(w http.ResponseWriter, r *http.Request) {
 		sendErrorResponse(w, "Failed to delete conversation", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Remove the session from active chains if it exists
 	sessionKey := fmt.Sprintf("%s:%s", req.UserID, req.SessionID)
 	delete(activeChains, sessionKey)
-	
+
 	response := DeleteConversationResponse{
 		Success: true,
 	}
-	
+
 	end := time.Now()
 	log.Printf("Deleted conversation %s for user %s in %s", req.SessionID, req.UserID, end.Sub(start))
 	w.Header().Set("Content-Type", "application/json")

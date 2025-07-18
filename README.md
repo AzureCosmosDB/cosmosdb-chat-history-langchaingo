@@ -83,14 +83,14 @@ export COSMOSDB_CONTAINER_NAME="your_container_name"
 # Choose ONE of the following connection methods:
 
 # Option 1: For Cosmos DB service
-export COSMOSDB_CONNECTION_STRING="your_connection_string"
+export COSMOSDB_ENDPOINT_URL="https://<your-account-name>.documents.azure.com:443/"
 
 # Option 2: For Cosmos DB Emulator
-export COSMOSDB_CONNECTION_STRING="AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==;"
+export COSMOSDB_ENDPOINT_URL="http://localhost:8081"
 
 # Azure OpenAI Configuration
-export OPENAI_BASE_URL="your-openai-endpoint" # e.g., https://your-resource-name.openai.azure.com/
-export OPENAI_API_KEY="your-api-key"
+export AZURE_OPENAI_ENDPOINT="your-openai-endpoint" # e.g., https://your-resource-name.openai.azure.com/
+export AZURE_OPENAI_KEY="your-api-key"
 export AZURE_OPENAI_MODEL_NAME="gpt-4o"  # or your deployed model name
 ```
 
@@ -123,18 +123,13 @@ To run the tests for the Azure Cosmos DB chat history component, use the followi
 go test -v github.com/abhirockzz/langchaingo-cosmosdb-chat-history/cosmosdb
 ```
 
+The integration tests use [Docker Model Runner](https://docs.docker.com/ai/model-runner/) to run a local LLM thats OpenAI compatible. Make sure you have the Docker Model Runner running before executing the tests.
+
+> At the time of writing, the Docker Model Runner is in Beta
+
 To run the integration tests for the application (if you already have the emulator running for the application, make sure to shut it down since the test starts a new instance of the emulator):
 
 ```bash
-export COSMOSDB_ENDPOINT_URL="http://localhost:8081"
-export COSMOSDB_DATABASE_NAME="chat_app_db"
-export COSMOSDB_CONTAINER_NAME="chats"
-
-export OPENAI_BASE_URL="your-openai-endpoint" # e.g., https://your-resource-name.openai.azure.com/
-export OPENAI_API_KEY="your-api-key"
-export AZURE_OPENAI_MODEL_NAME="gpt-4o"
-
-# Set port if not provided
 export PORT=${PORT:-8080}
 
 # Run the web server

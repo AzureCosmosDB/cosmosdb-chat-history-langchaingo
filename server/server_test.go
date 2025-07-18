@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,30 +15,39 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
+	"github.com/abhirockzz/cosmosdb-go-sdk-helper/auth"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/tmc/langchaingo/llms/openai"
 )
 
 const (
-	testPartitionKey        = "/userid"
-	emulatorImage          = "mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview"
-	emulatorPort           = "8081"
-	emulatorEndpoint       = "http://localhost:8081"
-	emulatorKey           = "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+	testPartitionKey = "/userid"
+	emulatorImage    = "mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview"
+	emulatorPort     = "8081"
+	emulatorEndpoint = "http://localhost:8081"
+
+	databaseName  = "demodb"
+	containerName = "chats"
+	modelName     = "ai/smollm3"
+
+	dockerModelRunnerOpenAIEndpoint = "http://localhost:12434/engines/v1"
 )
 
 var (
 	emulator testcontainers.Container
-	testClient *azcosmos.Client
+	app      *App
 )
 
 func TestMain(m *testing.M) {
 	// Set up the CosmosDB emulator container
 	ctx := context.Background()
+
 	var err error
+
 	emulator, err = setupCosmosEmulator(ctx)
 	if err != nil {
 		fmt.Printf("Failed to set up CosmosDB emulator: %v\n", err)
@@ -47,17 +55,47 @@ func TestMain(m *testing.M) {
 	}
 
 	// Set up the CosmosDB client
-	testClient, err = setupCosmosClient()
+	client, err := auth.GetCosmosDBClient(emulatorEndpoint, true, nil)
 	if err != nil {
 		fmt.Printf("Failed to set up CosmosDB client: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Set up the database and container
-	err = setupDatabaseAndContainer(ctx, testClient)
+	err = setupDatabaseAndContainer(ctx, client)
 	if err != nil {
 		fmt.Printf("Failed to set up database and container: %v\n", err)
 		os.Exit(1)
+	}
+
+	database, err := client.NewDatabase(databaseName)
+	if err != nil {
+		fmt.Printf("Failed to get database: %v\n", err)
+		os.Exit(1)
+	}
+
+	container, err := database.NewContainer(containerName)
+	if err != nil {
+		fmt.Printf("Failed to get container: %v\n", err)
+		os.Exit(1)
+	}
+
+	llm, err := openai.New(
+		openai.WithBaseURL(dockerModelRunnerOpenAIEndpoint),
+		openai.WithModel(modelName),
+		openai.WithToken("dummy_value"),
+	)
+	if err != nil {
+		fmt.Printf("Failed to initialize LLM: %v\n", err)
+		os.Exit(1)
+	}
+
+	app = &App{
+		cosmosClient:  client,
+		databaseName:  databaseName,
+		containerName: containerName,
+		container:     container,
+		llm:           llm,
 	}
 
 	// Run the tests
@@ -81,7 +119,7 @@ func setupCosmosEmulator(ctx context.Context) (testcontainers.Container, error) 
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
-		Started:         true,
+		Started:          true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
@@ -93,45 +131,21 @@ func setupCosmosEmulator(ctx context.Context) (testcontainers.Container, error) 
 	return container, nil
 }
 
-func setupCosmosClient() (*azcosmos.Client, error) {
-	cred, err := azcosmos.NewKeyCredential(emulatorKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create key credential: %w", err)
-	}
-
-	client, err := azcosmos.NewClientWithKey(emulatorEndpoint, cred, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cosmos client: %w", err)
-	}
-
-	return client, nil
-}
-
 func setupDatabaseAndContainer(ctx context.Context, client *azcosmos.Client) error {
 
-	testOperationDBName := os.Getenv("COSMOSDB_DATABASE_NAME")
-	if testOperationDBName == "" {
-		log.Fatalf("COSMOSDB_DATABASE_NAME environment variable is not set")
-	}
-
-	testOperationContainerName := os.Getenv("COSMOSDB_CONTAINER_NAME")
-	if testOperationContainerName == "" {
-		log.Fatalf("COSMOSDB_CONTAINER_NAME environment variable is not set")
-	}
-
-	databaseProps := azcosmos.DatabaseProperties{ID: testOperationDBName}
+	databaseProps := azcosmos.DatabaseProperties{ID: databaseName}
 	_, err := client.CreateDatabase(ctx, databaseProps, nil)
 	if err != nil && !isResourceExistsError(err) {
 		return fmt.Errorf("failed to create test database: %w", err)
 	}
 
-	database, err := client.NewDatabase(testOperationDBName)
+	database, err := client.NewDatabase(databaseName)
 	if err != nil {
 		return fmt.Errorf("failed to get database: %w", err)
 	}
 
 	containerProps := azcosmos.ContainerProperties{
-		ID: testOperationContainerName,
+		ID: containerName,
 		PartitionKeyDefinition: azcosmos.PartitionKeyDefinition{
 			Paths: []string{testPartitionKey},
 		},
@@ -155,9 +169,7 @@ func isResourceExistsError(err error) bool {
 }
 
 func TestStartChat(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	t.Run("New session", func(t *testing.T) {
 		req := StartChatRequest{
 			UserID: "test_user",
@@ -165,11 +177,11 @@ func TestStartChat(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/start", bytes.NewBuffer(body))
-		
-		HandleStartChat(w, r)
-		
+
+		app.HandleStartChat(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp StartChatResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -182,11 +194,11 @@ func TestStartChat(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/start", bytes.NewBuffer(body))
-		
-		HandleStartChat(w, r)
-		
+
+		app.HandleStartChat(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		
+
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "User ID is required")
@@ -194,21 +206,19 @@ func TestStartChat(t *testing.T) {
 }
 
 func TestGetHistory(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	// Create a test chat session
 	userID := "test_user_history"
 	sessionID := "test_session_history"
-	
+
 	t.Run("Empty history", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/history?userID=%s&sessionID=%s", userID, sessionID), nil)
-		
-		HandleGetHistory(w, r)
-		
+
+		app.HandleGetHistory(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp ChatHistoryResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -218,11 +228,11 @@ func TestGetHistory(t *testing.T) {
 	t.Run("Missing parameters", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/api/chat/history", nil)
-		
-		HandleGetHistory(w, r)
-		
+
+		app.HandleGetHistory(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		
+
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "UserID and SessionID are required")
@@ -230,19 +240,17 @@ func TestGetHistory(t *testing.T) {
 }
 
 func TestListConversations(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	userID := "test_user_list"
-	
+
 	t.Run("No conversations", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/user/conversations?userID=%s", userID), nil)
-		
-		HandleListConversations(w, r)
-		
+
+		app.HandleListConversations(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp ListConversationsResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -252,11 +260,11 @@ func TestListConversations(t *testing.T) {
 	t.Run("Missing user ID", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/api/user/conversations", nil)
-		
-		HandleListConversations(w, r)
-		
+
+		app.HandleListConversations(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		
+
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "UserID is required")
@@ -264,9 +272,7 @@ func TestListConversations(t *testing.T) {
 }
 
 func TestDeleteConversation(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	t.Run("Delete non-existent conversation", func(t *testing.T) {
 		req := DeleteConversationRequest{
 			UserID:    "test_user_delete",
@@ -275,11 +281,11 @@ func TestDeleteConversation(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/delete", bytes.NewBuffer(body))
-		
-		HandleDeleteConversation(w, r)
-		
+
+		app.HandleDeleteConversation(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp DeleteConversationResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -291,11 +297,11 @@ func TestDeleteConversation(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/delete", bytes.NewBuffer(body))
-		
-		HandleDeleteConversation(w, r)
-		
+
+		app.HandleDeleteConversation(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		
+
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "UserID and SessionID are required")
@@ -303,9 +309,7 @@ func TestDeleteConversation(t *testing.T) {
 }
 
 func TestChatFlow(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	// Test the complete flow: start chat -> send messages -> get history -> list conversations -> delete
 	userID := "test_user_flow"
 	var sessionID string
@@ -318,11 +322,11 @@ func TestChatFlow(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/start", bytes.NewBuffer(body))
-		
-		HandleStartChat(w, r)
-		
+
+		app.HandleStartChat(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp StartChatResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -352,7 +356,7 @@ func TestChatFlow(t *testing.T) {
 			w := httptest.NewRecorder()
 			r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer(body))
 
-			HandleStreamMessage(w, r)
+			app.HandleStreamMessage(w, r)
 
 			if msg.isUser {
 				// For user messages, verify the request was accepted
@@ -369,11 +373,11 @@ func TestChatFlow(t *testing.T) {
 	t.Run("Get history", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/history?userID=%s&sessionID=%s", userID, sessionID), nil)
-		
-		HandleGetHistory(w, r)
-		
+
+		app.HandleGetHistory(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp ChatHistoryResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -386,16 +390,16 @@ func TestChatFlow(t *testing.T) {
 	t.Run("List conversations", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", fmt.Sprintf("/api/user/conversations?userID=%s", userID), nil)
-		
-		HandleListConversations(w, r)
-		
+
+		app.HandleListConversations(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp ListConversationsResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		require.NotEmpty(t, resp.Conversations)
-		
+
 		// Find our conversation
 		found := false
 		for _, conv := range resp.Conversations {
@@ -417,11 +421,11 @@ func TestChatFlow(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/delete", bytes.NewBuffer(body))
-		
-		HandleDeleteConversation(w, r)
-		
+
+		app.HandleDeleteConversation(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		var resp DeleteConversationResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
@@ -430,7 +434,9 @@ func TestChatFlow(t *testing.T) {
 		// Verify conversation is gone
 		w = httptest.NewRecorder()
 		r = httptest.NewRequest("GET", fmt.Sprintf("/api/chat/history?userID=%s&sessionID=%s", userID, sessionID), nil)
-		HandleGetHistory(w, r)
+
+		app.HandleGetHistory(w, r)
+
 		assert.Equal(t, http.StatusOK, w.Code)
 		var historyResp ChatHistoryResponse
 		json.Unmarshal(w.Body.Bytes(), &historyResp)
@@ -440,8 +446,6 @@ func TestChatFlow(t *testing.T) {
 
 // Add function to test concurrent chat sessions.
 func TestConcurrentChats(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
 
 	users := []struct {
 		userID   string
@@ -465,12 +469,15 @@ func TestConcurrentChats(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/start", bytes.NewBuffer(body))
-		
-		HandleStartChat(w, r)
-		
+
+		app.HandleStartChat(w, r)
+
 		var resp StartChatResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
-		sessions = append(sessions, struct{userID string; sessionID string}{u.userID, resp.SessionID})
+		sessions = append(sessions, struct {
+			userID    string
+			sessionID string
+		}{u.userID, resp.SessionID})
 	}
 
 	// Send messages concurrently
@@ -483,23 +490,23 @@ func TestConcurrentChats(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer(body))
-		
-		HandleStreamMessage(w, r)
+
+		app.HandleStreamMessage(w, r)
 		assert.Equal(t, http.StatusOK, w.Code)
 	}
 
 	// Verify each user's history is separate
 	for _, session := range sessions {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/history?userID=%s&sessionID=%s", 
+		r := httptest.NewRequest("GET", fmt.Sprintf("/api/chat/history?userID=%s&sessionID=%s",
 			session.userID, session.sessionID), nil)
-		
-		HandleGetHistory(w, r)
-		
+
+		app.HandleGetHistory(w, r)
+
 		var resp ChatHistoryResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NotEmpty(t, resp.Messages)
-		
+
 		// Find the user's original question
 		found := false
 		for _, u := range users {
@@ -518,9 +525,7 @@ func TestConcurrentChats(t *testing.T) {
 }
 
 func TestStreamMessageErrors(t *testing.T) {
-	// Initialize the server
-	cosmosClient = testClient
-	
+
 	t.Run("Missing userID", func(t *testing.T) {
 		req := SendMessageRequest{
 			SessionID: "some_session",
@@ -529,15 +534,15 @@ func TestStreamMessageErrors(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer(body))
-		
-		HandleStreamMessage(w, r)
-		
+
+		app.HandleStreamMessage(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "UserID")
 	})
-	
+
 	t.Run("Missing sessionID", func(t *testing.T) {
 		req := SendMessageRequest{
 			UserID:  "some_user",
@@ -546,15 +551,15 @@ func TestStreamMessageErrors(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer(body))
-		
-		HandleStreamMessage(w, r)
-		
+
+		app.HandleStreamMessage(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "SessionID")
 	})
-	
+
 	t.Run("Empty message", func(t *testing.T) {
 		req := SendMessageRequest{
 			UserID:    "some_user",
@@ -564,33 +569,33 @@ func TestStreamMessageErrors(t *testing.T) {
 		body, _ := json.Marshal(req)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer(body))
-		
-		HandleStreamMessage(w, r)
-		
+
+		app.HandleStreamMessage(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "Message")
 	})
-	
+
 	t.Run("Invalid JSON", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/chat/stream", bytes.NewBuffer([]byte("invalid json")))
-		
-		HandleStreamMessage(w, r)
-		
+
+		app.HandleStreamMessage(w, r)
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		var resp ErrorResponse
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Contains(t, resp.Error, "request format")
 	})
-	
+
 	t.Run("Wrong HTTP method", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/api/chat/stream", nil)
-		
-		HandleStreamMessage(w, r)
-		
+
+		app.HandleStreamMessage(w, r)
+
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 	})
 }
