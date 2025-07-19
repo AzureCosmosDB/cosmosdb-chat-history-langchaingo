@@ -123,9 +123,10 @@ To run the tests for the Azure Cosmos DB chat history component, use the followi
 go test -v github.com/abhirockzz/langchaingo-cosmosdb-chat-history/cosmosdb
 ```
 
-The integration tests use [Docker Model Runner](https://docs.docker.com/ai/model-runner/) to run a local LLM thats OpenAI compatible. Make sure you have the Docker Model Runner running before executing the tests.
+The integration tests use [Docker Model Runner](https://docs.docker.com/ai/model-runner/) to run a local LLM thats OpenAI compatible. 
 
-> At the time of writing, the Docker Model Runner is in Beta
+> At the time of writing, the Docker Model Runner is in Beta. It needs a specific version of Docker Desktop (or Engine) and supported on specific platforms only. Make sure you have it setup on your machine - refer to the [Requirements](https://docs.docker.com/ai/model-runner/#requirements) section.
+
 
 To run the integration tests for the application (if you already have the emulator running for the application, make sure to shut it down since the test starts a new instance of the emulator):
 
