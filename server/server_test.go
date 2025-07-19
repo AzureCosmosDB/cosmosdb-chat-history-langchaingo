@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/dockermodelrunner"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/tmc/langchaingo/llms/openai"
 )
@@ -32,8 +33,9 @@ const (
 
 	databaseName  = "demodb"
 	containerName = "chats"
-	modelName     = "ai/smollm3"
 
+	// model will be pulled in setupModel. see https://docs.docker.com/ai/model-runner/#pull-a-model
+	modelName                       = "ai/smollm2"
 	dockerModelRunnerOpenAIEndpoint = "http://localhost:12434/engines/v1"
 )
 
@@ -98,12 +100,23 @@ func TestMain(m *testing.M) {
 		llm:           llm,
 	}
 
+	dmrContainer, err := setupModel(ctx, modelName)
+	if err != nil {
+		fmt.Printf("Failed to set up model on Docker Model Runner: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Run the tests
 	code := m.Run()
 
 	// Tear down the CosmosDB emulator container
 	if emulator != nil {
 		_ = emulator.Terminate(ctx)
+	}
+
+	// Terminate the Docker Model Runner container
+	if dmrContainer != nil {
+		_ = dmrContainer.Terminate(ctx)
 	}
 
 	os.Exit(code)
@@ -160,6 +173,22 @@ func setupDatabaseAndContainer(ctx context.Context, client *azcosmos.Client) err
 	return nil
 }
 
+func setupModel(ctx context.Context, name string) (testcontainers.Container, error) {
+	dmrCtr, err := dockermodelrunner.Run(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pull the model (this might take some time)
+	err = dmrCtr.PullModel(ctx, name)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return dmrCtr, nil
+}
+
 func isResourceExistsError(err error) bool {
 	var responseErr *azcore.ResponseError
 	if errors.As(err, &responseErr) {
@@ -170,7 +199,7 @@ func isResourceExistsError(err error) bool {
 
 func TestStartChat(t *testing.T) {
 
-	t.Run("New session", func(t *testing.T) {
+	t.Run("New session..", func(t *testing.T) {
 		req := StartChatRequest{
 			UserID: "test_user",
 		}

@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 server_test_v1
+server_v1
+test.go
+dmr_testbench_go
 .gitignore
 *.sh
 .DS_Store

@@ -61,6 +61,14 @@ func main() {
 		// an embedding model is not actually required but has been added because langchaingo requires it
 		openai.WithEmbeddingModel("dummy_value"),
 	)
+
+	// // Docker Model Runner OpenAI Endpoint
+	// llm, err := openai.New(
+	// 	openai.WithBaseURL("http://localhost:12434/engines/v1"),
+	// 	openai.WithModel("ai/smollm3"),
+	// 	openai.WithToken("dummy_value"),
+	// )
+
 	if err != nil {
 		log.Fatalf("Failed to initialize Azure OpenAI LLM: %v", err)
 	}
